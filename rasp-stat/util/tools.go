@@ -5,6 +5,14 @@ import (
 	"strings"
 )
 
+func MapToRawData[T interface{}, U int | float32 | string](o *[]T, mapper func(T) U) []U {
+	rawRes := make([]U, len(*o))
+	for i, d := range *o {
+		rawRes[i] = mapper(d)
+	}
+	return rawRes
+}
+
 func GetOrDefault[T interface{}](val *T, defaultIfNil T) T {
 	if val == nil {
 		return defaultIfNil
@@ -19,8 +27,8 @@ func SplitEqual(s string) (key, val string) {
 		key = pair[0]
 		val = ""
 	} else {
-		key = GetOrDefault(&pair[0], "")
-		val = GetOrDefault(&pair[1], "")
+		key = strings.Trim(GetOrDefault(&pair[0], ""), "\n\t ")
+		val = strings.Trim(GetOrDefault(&pair[1], ""), "\n\t ")
 	}
 	// fmt.Println(pair)
 	// for i := 0; i < len(pair)-1; i++ {
@@ -30,10 +38,18 @@ func SplitEqual(s string) (key, val string) {
 	return key, val
 }
 
-func ToFloat(s string) float64 {
-	res, err := strconv.ParseFloat(s, 64)
+func ToInt(s string) int {
+	res, err := strconv.Atoi(s)
 	if err != nil {
 		return -1
 	}
 	return res
+}
+
+func ToFloat(s string) float32 {
+	res, err := strconv.ParseFloat(s, 32)
+	if err != nil {
+		return -1
+	}
+	return float32(res)
 }
