@@ -24,51 +24,55 @@ func makeData(value float32, unit string, rounding int) DataPoint {
 
 var none = makeData(-1, "", 0)
 
-func (params *RaspStatServer) StartServer() {
+func (server *RaspStatServer) StartServer() bool {
 	if !DEBUG {
 		gin.SetMode(gin.ReleaseMode)
 		log.Log("Running version:", VERSION)
 	} else {
 		log.Log("Running in debug mode, version:", VERSION)
 	}
-	r := gin.Default()
+	r := gin.New()
+	if DEBUG {
+		r.Use(gin.Logger())
+	}
+	r.Use(gin.Recovery())
 	r.GET("/temp", func(c *gin.Context) {
-		if locked := params.ReadLock.TryLock(); locked && len(params.Service.temp) > 0 {
-			latestTemp := params.Service.temp[len(params.Service.temp)-1]
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.temp) > 0 {
+			latestTemp := server.Service.temp[len(server.Service.temp)-1]
 			c.JSON(200, DataPoint{Value: latestTemp.temperature})
-			params.ReadLock.Unlock()
+			server.ReadLock.Unlock()
 		} else {
 			c.JSON(200, none)
 		}
 	})
 	r.GET("/gpu", func(c *gin.Context) {
-		if locked := params.ReadLock.TryLock(); locked && len(params.Service.gpu) > 0 {
-			latestGpu := params.Service.gpu[len(params.Service.gpu)-1]
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.gpu) > 0 {
+			latestGpu := server.Service.gpu[len(server.Service.gpu)-1]
 			c.JSON(200, makeData(latestGpu.gpuSpeed, latestGpu.unit, 3))
-			params.ReadLock.Unlock()
+			server.ReadLock.Unlock()
 		} else {
 			c.JSON(200, none)
 		}
 	})
 	r.GET("/cpu", func(c *gin.Context) {
-		if locked := params.ReadLock.TryLock(); locked && len(params.Service.cpu) > 0 {
-			latestCpu := params.Service.cpu[len(params.Service.cpu)-1]
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.cpu) > 0 {
+			latestCpu := server.Service.cpu[len(server.Service.cpu)-1]
 			c.JSON(200, makeData(latestCpu.cpuSpeed, latestCpu.unit, 3))
-			params.ReadLock.Unlock()
+			server.ReadLock.Unlock()
 		} else {
 			c.JSON(200, none)
 		}
 	})
 	r.GET("raw", func(c *gin.Context) {
-		if locked := params.ReadLock.TryLock(); locked {
+		if locked := server.ReadLock.TryLock(); locked {
 			c.JSON(200, gin.H{
 				"data": gin.H{
-					"cpu":  params.Service.RawCpuDataPoints(),
-					"gpu":  params.Service.RawGpuDataPoints(),
-					"temp": params.Service.RawTemperatureDataPoints(),
+					"cpu":  server.Service.RawCpuDataPoints(),
+					"gpu":  server.Service.RawGpuDataPoints(),
+					"temp": server.Service.RawTemperatureDataPoints(),
 				},
 			})
-			params.ReadLock.Unlock()
+			server.ReadLock.Unlock()
 		} else {
 			c.JSON(200, none)
 		}
@@ -98,6 +102,12 @@ func (params *RaspStatServer) StartServer() {
 		c.JSON(200, none)
 	})
 
-	log.Log("Started server on port", params.Port)
-	r.Run(fmt.Sprintf(":%d", params.Port))
+	err := r.Run(fmt.Sprintf(":%d", server.Port))
+	if err == nil {
+		log.Log("Started server on port", server.Port)
+	} else {
+		log.Log("Could not start server", err.Error())
+		return false
+	}
+	return true
 }

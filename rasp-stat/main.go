@@ -55,11 +55,9 @@ func startFetchServiceAndServer() {
 	port, interval, buffer := env()
 
 	var rwMutex sync.Mutex
-	var wait sync.WaitGroup
 	var server RaspStatServer
 	var iss InstantStatService
 
-	wait.Add(1)
 	iss = NewInstantStatService(
 		uint16(interval),
 		uint16(buffer),
@@ -67,13 +65,10 @@ func startFetchServiceAndServer() {
 	iss.ReadWriteLock = &rwMutex
 	iss.FetchAndCacheStats()
 
-	wait.Add(1)
 	server.Port = port
 	server.Service = &iss
 	server.ReadLock = &rwMutex
 	server.StartServer()
-
-	wait.Wait()
 }
 
 func main() {
