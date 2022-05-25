@@ -2,14 +2,22 @@ FROM golang
 
 WORKDIR /app
 
+# Default: 4322
+ARG PORT 
+# Default: 10 (data points)
+ENV BUFFER
+# Default: 6 (seconds)
+ENV INTERVAL
+ENV GIN_MODE=release
+
+COPY Makefile
 COPY go.mod ./
 COPY go.sum ./
 RUN go mod download
 
-COPY *.go ./
-ENV GIN_MODE=release
-RUN go build -o rasp-stat-go
+COPY rasp-stat ./
+RUN make prod-arm
 
-EXPOSE 4322
+EXPOSE $PORT
 
-ENTRYPOINT "rasp-stat-go"
+ENTRYPOINT "build/rasp-stat_arm-linux"
