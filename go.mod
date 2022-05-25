@@ -1,4 +1,4 @@
-module github.com/han-sz/rasp-stat-go
+module rasp-stat
 
 go 1.18
 

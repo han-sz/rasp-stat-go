@@ -8,11 +8,11 @@ type Loggable interface {
 
 type Log struct {
 	Loggable
-	name, version string
+	Name, Version string
 }
 
 func (l *Log) Log(s ...interface{}) {
-	fmt.Print("[", GetOrDefault(&l.name, "")+":", GetOrDefault(&l.version, ""), "] ")
+	fmt.Print("[", GetOrDefault(&l.Name, "")+":", GetOrDefault(&l.Version, ""), "] ")
 	for _, log := range s {
 		fmt.Print(log, " ")
 	}
