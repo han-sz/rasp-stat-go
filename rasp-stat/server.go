@@ -38,7 +38,7 @@ func (server *RaspStatServer) StartServer() bool {
 	}
 	r.Use(gin.Recovery())
 	// Used as a prev val cache for when the read lock is already acquired by another request
-	cached := make(map[string]DataPoint)
+	var cached sync.Map
 	r.GET("/temp", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.temp) > 0 {
 			latestTemp := server.Service.temp[len(server.Service.temp)-1]
@@ -46,9 +46,9 @@ func (server *RaspStatServer) StartServer() bool {
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
-			cached[c.FullPath()] = response
+			cached.Store(c.FullPath(), response)
 		} else {
-			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("/gpu", func(c *gin.Context) {
@@ -58,9 +58,9 @@ func (server *RaspStatServer) StartServer() bool {
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
-			cached[c.FullPath()] = response
+			cached.Store(c.FullPath(), response)
 		} else {
-			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("/cpu", func(c *gin.Context) {
@@ -70,23 +70,9 @@ func (server *RaspStatServer) StartServer() bool {
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
-			cached[c.FullPath()] = response
+			cached.Store(c.FullPath(), response)
 		} else {
-			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
-		}
-	})
-	r.GET("raw", func(c *gin.Context) {
-		if locked := server.ReadLock.TryLock(); locked {
-			c.JSON(200, gin.H{
-				"data": gin.H{
-					"cpu":  server.Service.RawCpuDataPoints(),
-					"gpu":  server.Service.RawGpuDataPoints(),
-					"temp": server.Service.RawTemperatureDataPoints(),
-				},
-			})
-			server.ReadLock.Unlock()
-		} else {
-			c.JSON(200, none)
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("/volts", func(c *gin.Context) {
@@ -96,21 +82,37 @@ func (server *RaspStatServer) StartServer() bool {
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
-			cached[c.FullPath()] = response
+			cached.Store(c.FullPath(), response)
 		} else {
-			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("/throttled", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.throttled) > 0 {
 			latestThrottleVal := server.Service.throttled[len(server.Service.throttled)-1]
-			response := DataPoint{Value: util.Is(latestThrottleVal.isThrottled, "Yes", "No")}
+			response := DataPoint{Value: latestThrottleVal.value}
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
-			cached[c.FullPath()] = response
+			cached.Store(c.FullPath(), response)
 		} else {
-			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
+		}
+	})
+	r.GET("/raw", func(c *gin.Context) {
+		if locked := server.ReadLock.TryLock(); locked {
+			c.JSON(200, gin.H{
+				"data": gin.H{
+					"cpu":       server.Service.RawCpuDataPoints(),
+					"gpu":       server.Service.RawGpuDataPoints(),
+					"temp":      server.Service.RawTemperatureDataPoints(),
+					"volts":     server.Service.RawCpuVoltageDataPoints(),
+					"throttled": server.Service.RawCpuThrottledDataPoints(),
+				},
+			})
+			server.ReadLock.Unlock()
+		} else {
+			c.JSON(200, none)
 		}
 	})
 	r.GET("/mem", func(c *gin.Context) {

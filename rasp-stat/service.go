@@ -42,6 +42,7 @@ type temperature struct {
 }
 
 type throttled struct {
+	value       string
 	rawValue    string
 	isThrottled bool
 }
@@ -62,6 +63,8 @@ type InstantStatServiceInterface interface {
 
 	RawCpuDataPoints()
 	RawGpuDataPoints()
+	RawCpuVoltageDataPoints()
+	RawCpuThrottledDataPoints()
 	RawTemperatureDataPoints()
 }
 
@@ -83,7 +86,7 @@ type InstantStatService struct {
 // Helper functions
 
 func addDataPoint[T interface{}](t *[]T, dp T, max int) {
-	if len(*t)+1 >= max {
+	if len(*t)+1 > max {
 		*t = (*t)[1:]
 	}
 	*t = append(*t, dp)
@@ -110,11 +113,11 @@ func NewInstantStatService(fetchIntervalSeconds uint16, inMemDataPointsPerStat u
 		FetchIntervalSeconds:   fetchIntervalSeconds,
 		InMemDataPointsPerStat: inMemDataPointsPerStat,
 
-		cpu:       make([]cpu, inMemDataPointsPerStat),
-		gpu:       make([]gpu, inMemDataPointsPerStat),
-		temp:      make([]temperature, inMemDataPointsPerStat),
-		volts:     make([]voltage, inMemDataPointsPerStat),
-		throttled: make([]throttled, inMemDataPointsPerStat),
+		cpu:       make([]cpu, 1, inMemDataPointsPerStat),
+		gpu:       make([]gpu, 1, inMemDataPointsPerStat),
+		temp:      make([]temperature, 1, inMemDataPointsPerStat),
+		volts:     make([]voltage, 1, inMemDataPointsPerStat),
+		throttled: make([]throttled, 1, inMemDataPointsPerStat),
 	}
 	return iss
 }
@@ -138,7 +141,8 @@ func (iss *InstantStatService) FetchCurrentCpuVoltage() {
 		return
 	}
 	_, v := util.SplitEqual(res)
-	volts := util.ToFloat(v)
+
+	volts := util.ToFloat(strings.ReplaceAll(v, "V", ""))
 
 	iss.acquireLock(func() {
 		addDataPoint(&iss.volts, voltage{volts: volts, unit: "volts"}, int(iss.InMemDataPointsPerStat))
@@ -155,7 +159,7 @@ func (iss *InstantStatService) FetchCurrentCpuThrottled() {
 	iss.acquireLock(func() {
 		addDataPoint(
 			&iss.throttled,
-			throttled{rawValue: v, isThrottled: v == "0x0"},
+			throttled{rawValue: v, value: util.Is(v == "0x0", "No", "Yes"), isThrottled: v != "0x0"},
 			int(iss.InMemDataPointsPerStat),
 		)
 	})
@@ -205,11 +209,25 @@ func (iss *InstantStatService) RawTemperatureDataPoints() []float32 {
 	})
 }
 
+func (iss *InstantStatService) RawCpuVoltageDataPoints() []float32 {
+	return util.MapToRawData(&iss.volts, func(val voltage) float32 {
+		return val.volts
+	})
+}
+
+func (iss *InstantStatService) RawCpuThrottledDataPoints() []int {
+	return util.MapToRawData(&iss.throttled, func(val throttled) int {
+		return util.Is(val.isThrottled, 1, 0)
+	})
+}
+
 func (iss *InstantStatService) FetchAndCacheStats() {
 	go func() {
 		for {
-			iss.FetchCurrentCpuSpeed()
 			iss.FetchCurrentGpuSpeed()
+			iss.FetchCurrentCpuSpeed()
+			iss.FetchCurrentCpuVoltage()
+			iss.FetchCurrentCpuThrottled()
 			iss.FetchCurrentTemperature()
 
 			time.Sleep(time.Duration(iss.FetchIntervalSeconds) * time.Second)

@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	VERSION string = "1.0.3"
+	VERSION string = "1.0.4"
 	DEBUG   bool   = false
 )
 
@@ -46,7 +46,7 @@ func env() (port, interval, buffer int) {
 		if parsedBuffer != -1 {
 			buffer = parsedBuffer
 		}
-		log.Log("Setting data point buffer from environment:", interval)
+		log.Log("Setting data point buffer from environment:", bufferEnv)
 	}
 	return
 }
