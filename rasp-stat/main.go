@@ -1,16 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"os/exec"
 
 	"github.com/gin-gonic/gin"
 )
 
 const (
 	VERSION string = "1.0.0"
-	DEBUG   bool   = true
+	DEBUG   bool   = false
 )
 
 var port string = "4322"
@@ -22,14 +20,6 @@ type DataPoint struct {
 
 func makeData(value string) DataPoint {
 	return DataPoint{Value: value}
-}
-
-func commandOutput(command string) (string, error) {
-	output, err := exec.Command(command).Output()
-	if err != nil {
-		fmt.Println(err.Error())
-	}
-	return string(output), err
 }
 
 func env() {
@@ -59,7 +49,13 @@ func main() {
 	}
 	r := gin.Default()
 	r.GET("/test", func(c *gin.Context) {
-		if res, err := commandOutput("/usr/sbin/sysctl -a"); err == nil {
+		if res, err := commandOutput("/opt/vc/bin/vcgencmd measure_clock core -a"); err == nil {
+			log.Log("CPU", res)
+			c.JSON(200, makeData(res))
+		} else {
+		}
+		if res, err := commandOutput("/opt/vc/bin/vcgencmd measure_temp"); err == nil {
+			log.Log("Temp", res)
 			c.JSON(200, makeData(res))
 		} else {
 			c.JSON(200, makeData("Unknown"))

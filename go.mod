@@ -1,4 +1,4 @@
-module hshersy.com/rasp-stat
+module github.com/han-sz/rasp-stat-go
 
 go 1.18
 
