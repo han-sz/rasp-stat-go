@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	VERSION string = "1.0.2"
+	VERSION string = "1.0.3"
 	DEBUG   bool   = false
 )
 
@@ -54,7 +54,7 @@ func env() (port, interval, buffer int) {
 func startFetchServiceAndServer() {
 	port, interval, buffer := env()
 
-	var rwMutex sync.Mutex
+	var rwMutex sync.Mutex // TODO use semaphore instead for read block
 	var server RaspStatServer
 	var iss InstantStatService
 

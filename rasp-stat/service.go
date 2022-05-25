@@ -17,33 +17,47 @@ const CPUTHROTTLED_CMD = "vcgencmd get_throttled"
 const CPUVOLTS_CMD = "vcgencmd measure_volts"
 const MEMORY_CMD = "free -m | awk 'NR==2{print $7,$2} NR==3{print $2,$3}'"
 
+// TODO
 type memory struct {
 	unit         string
-	memFree      string `json:"memFree"`
-	memTotal     string `json:"memTotal"`
-	memSwap      string `json:"memSwap"`
-	memSwapTotal string `json:"memSwapTotal"`
+	memFree      string
+	memTotal     string
+	memSwap      string
+	memSwapTotal string
 }
 
 type cpu struct {
-	unit      string
-	cpuSpeed  float32 `json:"cpu"`
-	throttled bool    `json:"throttled"`
+	unit     string
+	cpuSpeed float32
 }
 
 type gpu struct {
 	unit     string
-	gpuSpeed float32 `json:"gpu"`
+	gpuSpeed float32
 }
 
 type temperature struct {
 	unit        string
-	temperature string `json:"temp"`
+	temperature float32
 }
+
+type throttled struct {
+	rawValue    string
+	isThrottled bool
+}
+
+type voltage struct {
+	unit  string
+	volts float32
+}
+
 type InstantStatServiceInterface interface {
 	FetchAndCacheStats()
-	FetchCurrentCpuSpeed()
+
 	FetchCurrentGpuSpeed()
+	FetchCurrentCpuSpeed()
+	FetchCurrentCpuVoltage()
+	FetchCurrentCpuThrottled()
 	FetchCurrentTemperature()
 
 	RawCpuDataPoints()
@@ -59,10 +73,14 @@ type InstantStatService struct {
 
 	ReadWriteLock *sync.Mutex
 
-	cpu  []cpu
-	gpu  []gpu
-	temp []temperature
+	cpu       []cpu
+	gpu       []gpu
+	temp      []temperature
+	volts     []voltage
+	throttled []throttled
 }
+
+// Helper functions
 
 func addDataPoint[T interface{}](t *[]T, dp T, max int) {
 	if len(*t)+1 >= max {
@@ -71,13 +89,32 @@ func addDataPoint[T interface{}](t *[]T, dp T, max int) {
 	*t = append(*t, dp)
 }
 
+func (iss *InstantStatService) acquireLock(critical func()) {
+	if DEBUG {
+		log.Log("Acquiring lock")
+	}
+	iss.ReadWriteLock.Lock()
+	critical()
+	iss.ReadWriteLock.Unlock()
+	if DEBUG {
+		log.Log("Released lock")
+	}
+}
+
+// InstantStatService
+
 func NewInstantStatService(fetchIntervalSeconds uint16, inMemDataPointsPerStat uint16) InstantStatService {
 	var iss InstantStatService = InstantStatService{
-		cpu:                    make([]cpu, inMemDataPointsPerStat),
-		gpu:                    make([]gpu, inMemDataPointsPerStat),
-		temp:                   make([]temperature, inMemDataPointsPerStat),
+		// If the data points are not initialised beforehand, there will be a silent deadlock in the
+		// main goroutine when there is a request from the server and the lock is being acquired
 		FetchIntervalSeconds:   fetchIntervalSeconds,
 		InMemDataPointsPerStat: inMemDataPointsPerStat,
+
+		cpu:       make([]cpu, inMemDataPointsPerStat),
+		gpu:       make([]gpu, inMemDataPointsPerStat),
+		temp:      make([]temperature, inMemDataPointsPerStat),
+		volts:     make([]voltage, inMemDataPointsPerStat),
+		throttled: make([]throttled, inMemDataPointsPerStat),
 	}
 	return iss
 }
@@ -90,12 +127,38 @@ func (iss *InstantStatService) FetchCurrentCpuSpeed() {
 	_, v := util.SplitEqual(res)
 	cpuSpeed := util.ToFloat(v) / 1000.0 / 1000.0 / 1000.0
 
-	(*iss.ReadWriteLock).Lock()
-	addDataPoint(&iss.cpu, cpu{cpuSpeed: cpuSpeed, unit: "GHz"}, int(iss.InMemDataPointsPerStat))
-	if DEBUG {
-		log.Log(iss.cpu)
+	iss.acquireLock(func() {
+		addDataPoint(&iss.cpu, cpu{cpuSpeed: cpuSpeed, unit: "GHz"}, int(iss.InMemDataPointsPerStat))
+	})
+}
+
+func (iss *InstantStatService) FetchCurrentCpuVoltage() {
+	res, err := commandOutput(CPUVOLTS_CMD)
+	if err != nil {
+		return
 	}
-	(*iss.ReadWriteLock).Unlock()
+	_, v := util.SplitEqual(res)
+	volts := util.ToFloat(v)
+
+	iss.acquireLock(func() {
+		addDataPoint(&iss.volts, voltage{volts: volts, unit: "volts"}, int(iss.InMemDataPointsPerStat))
+	})
+}
+
+func (iss *InstantStatService) FetchCurrentCpuThrottled() {
+	res, err := commandOutput(CPUTHROTTLED_CMD)
+	if err != nil {
+		return
+	}
+	_, v := util.SplitEqual(res)
+
+	iss.acquireLock(func() {
+		addDataPoint(
+			&iss.throttled,
+			throttled{rawValue: v, isThrottled: v == "0x0"},
+			int(iss.InMemDataPointsPerStat),
+		)
+	})
 }
 
 func (iss *InstantStatService) FetchCurrentGpuSpeed() {
@@ -106,12 +169,9 @@ func (iss *InstantStatService) FetchCurrentGpuSpeed() {
 	_, v := util.SplitEqual(res)
 	gpuSpeed := util.ToFloat(v) / 1000.0 / 1000.0 / 1000.0
 
-	(*iss.ReadWriteLock).Lock()
-	addDataPoint(&iss.gpu, gpu{gpuSpeed: gpuSpeed, unit: "GHz"}, int(iss.InMemDataPointsPerStat))
-	if DEBUG {
-		log.Log(iss.gpu)
-	}
-	(*iss.ReadWriteLock).Unlock()
+	iss.acquireLock(func() {
+		addDataPoint(&iss.gpu, gpu{gpuSpeed: gpuSpeed, unit: "GHz"}, int(iss.InMemDataPointsPerStat))
+	})
 }
 
 func (iss *InstantStatService) FetchCurrentTemperature() {
@@ -120,13 +180,11 @@ func (iss *InstantStatService) FetchCurrentTemperature() {
 		return
 	}
 	_, v := util.SplitEqual(res)
+	formattedTemp := util.ToFloat(strings.ReplaceAll(v, "'C", ""))
 
-	(*iss.ReadWriteLock).Lock()
-	addDataPoint(&iss.temp, temperature{temperature: v}, int(iss.InMemDataPointsPerStat))
-	if DEBUG {
-		log.Log(iss.gpu)
-	}
-	(*iss.ReadWriteLock).Unlock()
+	iss.acquireLock(func() {
+		addDataPoint(&iss.temp, temperature{temperature: formattedTemp, unit: "C"}, int(iss.InMemDataPointsPerStat))
+	})
 }
 
 func (iss *InstantStatService) RawCpuDataPoints() []float32 {
@@ -141,8 +199,8 @@ func (iss *InstantStatService) RawGpuDataPoints() []float32 {
 	})
 }
 
-func (iss *InstantStatService) RawTemperatureDataPoints() []string {
-	return util.MapToRawData(&iss.temp, func(val temperature) string {
+func (iss *InstantStatService) RawTemperatureDataPoints() []float32 {
+	return util.MapToRawData(&iss.temp, func(val temperature) float32 {
 		return val.temperature
 	})
 }
@@ -168,8 +226,8 @@ func commandOutput(command string) (string, error) {
 		}
 		return "", err
 	}
-	// if DEBUG {
-	// 	log.Log("Running:", split, string(output))
-	// }
+	if DEBUG {
+		log.Log("Running:", split, string(output))
+	}
 	return string(output), nil
 }

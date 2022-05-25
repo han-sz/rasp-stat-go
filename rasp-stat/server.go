@@ -37,12 +37,12 @@ func (server *RaspStatServer) StartServer() bool {
 		r.Use(gin.Logger())
 	}
 	r.Use(gin.Recovery())
-	// Used as a fast cache for when the read lock is already acquired by another request
+	// Used as a prev val cache for when the read lock is already acquired by another request
 	cached := make(map[string]DataPoint)
 	r.GET("/temp", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.temp) > 0 {
 			latestTemp := server.Service.temp[len(server.Service.temp)-1]
-			response := DataPoint{Value: latestTemp.temperature}
+			response := makeData(latestTemp.temperature, latestTemp.unit, 1)
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
@@ -90,10 +90,28 @@ func (server *RaspStatServer) StartServer() bool {
 		}
 	})
 	r.GET("/volts", func(c *gin.Context) {
-		c.JSON(200, none)
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.volts) > 0 {
+			latestVoltage := server.Service.volts[len(server.Service.volts)-1]
+			response := makeData(latestVoltage.volts, latestVoltage.unit, 2)
+			c.JSON(200, response)
+			server.ReadLock.Unlock()
+
+			cached[c.FullPath()] = response
+		} else {
+			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
+		}
 	})
 	r.GET("/throttled", func(c *gin.Context) {
-		c.JSON(200, none)
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.throttled) > 0 {
+			latestThrottleVal := server.Service.throttled[len(server.Service.throttled)-1]
+			response := DataPoint{Value: util.Is(latestThrottleVal.isThrottled, "Yes", "No")}
+			c.JSON(200, response)
+			server.ReadLock.Unlock()
+
+			cached[c.FullPath()] = response
+		} else {
+			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
+		}
 	})
 	r.GET("/mem", func(c *gin.Context) {
 		c.JSON(200, none)
