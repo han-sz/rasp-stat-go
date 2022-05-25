@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"rasp-stat/rasp-stat/util"
 	"sync"
 
 	"github.com/gin-gonic/gin"
@@ -36,31 +37,42 @@ func (server *RaspStatServer) StartServer() bool {
 		r.Use(gin.Logger())
 	}
 	r.Use(gin.Recovery())
+	// Used as a fast cache for when the read lock is already acquired by another request
+	cached := make(map[string]DataPoint)
 	r.GET("/temp", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.temp) > 0 {
 			latestTemp := server.Service.temp[len(server.Service.temp)-1]
-			c.JSON(200, DataPoint{Value: latestTemp.temperature})
+			response := DataPoint{Value: latestTemp.temperature}
+			c.JSON(200, response)
 			server.ReadLock.Unlock()
+
+			cached[c.FullPath()] = response
 		} else {
-			c.JSON(200, none)
+			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("/gpu", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.gpu) > 0 {
 			latestGpu := server.Service.gpu[len(server.Service.gpu)-1]
-			c.JSON(200, makeData(latestGpu.gpuSpeed, latestGpu.unit, 3))
+			response := makeData(latestGpu.gpuSpeed, latestGpu.unit, 3)
+			c.JSON(200, response)
 			server.ReadLock.Unlock()
+
+			cached[c.FullPath()] = response
 		} else {
-			c.JSON(200, none)
+			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("/cpu", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.cpu) > 0 {
 			latestCpu := server.Service.cpu[len(server.Service.cpu)-1]
-			c.JSON(200, makeData(latestCpu.cpuSpeed, latestCpu.unit, 3))
+			response := makeData(latestCpu.cpuSpeed, latestCpu.unit, 3)
+			c.JSON(200, response)
 			server.ReadLock.Unlock()
+
+			cached[c.FullPath()] = response
 		} else {
-			c.JSON(200, none)
+			c.JSON(200, util.GetOrDefaultMap(&cached, c.FullPath(), none))
 		}
 	})
 	r.GET("raw", func(c *gin.Context) {
@@ -102,9 +114,9 @@ func (server *RaspStatServer) StartServer() bool {
 		c.JSON(200, none)
 	})
 
+	log.Log("Starting server on port", server.Port)
 	err := r.Run(fmt.Sprintf(":%d", server.Port))
 	if err == nil {
-		log.Log("Started server on port", server.Port)
 	} else {
 		log.Log("Could not start server", err.Error())
 		return false

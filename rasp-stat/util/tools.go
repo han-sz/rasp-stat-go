@@ -20,6 +20,14 @@ func GetOrDefault[T interface{}](val *T, defaultIfNil T) T {
 	return *val
 }
 
+func GetOrDefaultMap[K comparable, V interface{}, T map[K]V](m *T, k K, defaultIfNil V) V {
+	val, found := (*m)[k]
+	if !found {
+		return defaultIfNil
+	}
+	return val
+}
+
 func SplitEqual(s string) (key, val string) {
 	// kv := make(map[string]string)
 	pair := strings.SplitN(s, "=", 2)
