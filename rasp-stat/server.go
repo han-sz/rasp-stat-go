@@ -15,15 +15,7 @@ type RaspStatServer struct {
 	ReadLock *sync.Mutex
 }
 
-type DataPoint struct {
-	Value string `json:"data"`
-}
-
-func makeData(value float32, unit string, rounding int) DataPoint {
-	return DataPoint{Value: fmt.Sprintf("%."+fmt.Sprint(rounding)+"f %s", value, unit)}
-}
-
-var none = makeData(-1, "", 0)
+var none = makeDataInt(-1, "")
 
 func (server *RaspStatServer) StartServer() bool {
 	if !DEBUG {
@@ -42,7 +34,7 @@ func (server *RaspStatServer) StartServer() bool {
 	r.GET("/temp", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.temp) > 0 {
 			latestTemp := server.Service.temp[len(server.Service.temp)-1]
-			response := makeData(latestTemp.temperature, latestTemp.unit, 1)
+			response := makeDataFloat(latestTemp.temperature, latestTemp.unit, 1)
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
@@ -54,7 +46,7 @@ func (server *RaspStatServer) StartServer() bool {
 	r.GET("/gpu", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.gpu) > 0 {
 			latestGpu := server.Service.gpu[len(server.Service.gpu)-1]
-			response := makeData(latestGpu.gpuSpeed, latestGpu.unit, 3)
+			response := makeDataFloat(latestGpu.gpuSpeed, latestGpu.unit, 3)
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
@@ -66,7 +58,7 @@ func (server *RaspStatServer) StartServer() bool {
 	r.GET("/cpu", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.cpu) > 0 {
 			latestCpu := server.Service.cpu[len(server.Service.cpu)-1]
-			response := makeData(latestCpu.cpuSpeed, latestCpu.unit, 3)
+			response := makeDataFloat(latestCpu.cpuSpeed, latestCpu.unit, 3)
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
@@ -78,7 +70,7 @@ func (server *RaspStatServer) StartServer() bool {
 	r.GET("/volts", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.volts) > 0 {
 			latestVoltage := server.Service.volts[len(server.Service.volts)-1]
-			response := makeData(latestVoltage.volts, latestVoltage.unit, 2)
+			response := makeDataFloat(latestVoltage.volts, latestVoltage.unit, 2)
 			c.JSON(200, response)
 			server.ReadLock.Unlock()
 
@@ -118,20 +110,85 @@ func (server *RaspStatServer) StartServer() bool {
 	r.GET("/mem", func(c *gin.Context) {
 		c.JSON(200, none)
 	})
+	// TODO as /mem/free
 	r.GET("/memFree", func(c *gin.Context) {
-		c.JSON(200, none)
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.memory) > 0 {
+			latestMemoryVal := server.Service.memory[len(server.Service.memory)-1]
+			response := makeDataInt(latestMemoryVal.memFree, latestMemoryVal.unit)
+			c.JSON(200, response)
+			server.ReadLock.Unlock()
+
+			cached.Store(c.FullPath(), response)
+		} else {
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
+		}
 	})
+	// TODO as /mem/total
 	r.GET("/memTotal", func(c *gin.Context) {
-		c.JSON(200, none)
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.memory) > 0 {
+			latestMemoryVal := server.Service.memory[len(server.Service.memory)-1]
+			response := makeDataInt(latestMemoryVal.memTotal, latestMemoryVal.unit)
+			c.JSON(200, response)
+			server.ReadLock.Unlock()
+
+			cached.Store(c.FullPath(), response)
+		} else {
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
+		}
 	})
+	// TODO as /mem/swap
 	r.GET("/memSwap", func(c *gin.Context) {
-		c.JSON(200, none)
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.memory) > 0 {
+			latestMemoryVal := server.Service.memory[len(server.Service.memory)-1]
+			response := makeDataInt(latestMemoryVal.memSwap, latestMemoryVal.unit)
+			c.JSON(200, response)
+			server.ReadLock.Unlock()
+
+			cached.Store(c.FullPath(), response)
+		} else {
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
+		}
 	})
+	// TODO as /mem/swap-total
 	r.GET("/memSwapTotal", func(c *gin.Context) {
-		c.JSON(200, none)
+		if locked := server.ReadLock.TryLock(); locked && len(server.Service.memory) > 0 {
+			latestMemoryVal := server.Service.memory[len(server.Service.memory)-1]
+			response := makeDataInt(latestMemoryVal.memSwapTotal, latestMemoryVal.unit)
+			c.JSON(200, response)
+			server.ReadLock.Unlock()
+
+			cached.Store(c.FullPath(), response)
+		} else {
+			c.JSON(200, util.GetOrDefaultSafeMap(&cached, c.FullPath(), none))
+		}
 	})
 	r.GET("/wifi", func(c *gin.Context) {
 		c.JSON(200, none)
+	})
+	r.GET("/power/off/:min", func(c *gin.Context) {
+		minutes := util.ToInt(c.Param("min"))
+		if minutes < 0 {
+			minutes = 0
+		}
+		_, err := commandOutput(fmt.Sprintf("shutdown --poweroff %d", minutes))
+		log.Log("Power-off command received..")
+		if err == nil {
+			log.Log("Power-off has been scheduled for", minutes, "minutes")
+			c.JSON(200, gin.H{"status": "triggered"})
+		} else {
+			log.Log("Power-off was cancelled", err.Error())
+			c.JSON(500, gin.H{"status": "failed", "error": err.Error()})
+		}
+	})
+	r.GET("/power/reboot", func(c *gin.Context) {
+		_, err := commandOutput("reboot")
+		log.Log("Reboot command received..")
+		if err == nil {
+			c.JSON(200, gin.H{"status": "triggered"})
+		} else {
+			log.Log("Reboot was cancelled", err.Error())
+			c.JSON(500, gin.H{"status": "failed", "error": err.Error()})
+		}
 	})
 
 	log.Log("Starting server on port", server.Port)
@@ -142,4 +199,16 @@ func (server *RaspStatServer) StartServer() bool {
 		return false
 	}
 	return true
+}
+
+type DataPoint struct {
+	Value string `json:"data"`
+}
+
+func makeDataFloat(value float32, unit string, rounding int) DataPoint {
+	return DataPoint{Value: fmt.Sprintf("%."+fmt.Sprint(rounding)+"f %s", value, unit)}
+}
+
+func makeDataInt(value int, unit string) DataPoint {
+	return DataPoint{Value: fmt.Sprintf("%d %s", value, unit)}
 }

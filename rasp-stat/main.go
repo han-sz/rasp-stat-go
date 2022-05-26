@@ -7,7 +7,7 @@ import (
 )
 
 const (
-	VERSION string = "1.0.4"
+	VERSION string = "1.0.5"
 	DEBUG   bool   = false
 )
 
@@ -18,6 +18,30 @@ const (
 )
 
 var log util.Loggable = &util.Log{Name: "rasp-stat", Version: VERSION}
+
+func startFetchServiceAndServer() {
+	port, interval, buffer := env()
+
+	var rwMutex sync.Mutex // TODO use semaphore instead for read block
+	var server RaspStatServer
+	var iss InstantStatService
+
+	iss = NewInstantStatService(
+		uint16(interval),
+		uint16(buffer),
+	)
+	iss.ReadWriteLock = &rwMutex
+	iss.FetchAndCacheStats()
+
+	server.Port = port
+	server.Service = &iss
+	server.ReadLock = &rwMutex
+	server.StartServer()
+}
+
+func main() {
+	startFetchServiceAndServer()
+}
 
 func env() (port, interval, buffer int) {
 	port = DEFAULT_PORT
@@ -46,32 +70,7 @@ func env() (port, interval, buffer int) {
 		if parsedBuffer != -1 {
 			buffer = parsedBuffer
 		}
-		log.Log("Setting data point buffer from environment:", bufferEnv)
+		log.Log("Setting data point buffer from environment:", buffer)
 	}
 	return
-}
-
-func startFetchServiceAndServer() {
-	port, interval, buffer := env()
-
-	var rwMutex sync.Mutex // TODO use semaphore instead for read block
-	var server RaspStatServer
-	var iss InstantStatService
-
-	iss = NewInstantStatService(
-		uint16(interval),
-		uint16(buffer),
-	)
-	iss.ReadWriteLock = &rwMutex
-	iss.FetchAndCacheStats()
-
-	server.Port = port
-	server.Service = &iss
-	server.ReadLock = &rwMutex
-	server.StartServer()
-}
-
-func main() {
-	startFetchServiceAndServer()
-
 }

@@ -15,15 +15,14 @@ const GPUSPEED_CMD = "vcgencmd measure_clock core"
 const CPUSPEED_CMD = "vcgencmd measure_clock arm"
 const CPUTHROTTLED_CMD = "vcgencmd get_throttled"
 const CPUVOLTS_CMD = "vcgencmd measure_volts"
-const MEMORY_CMD = "free -m | awk 'NR==2{print $7,$2} NR==3{print $2,$3}'"
+const MEMORY_CMD = "free -m"
 
-// TODO
 type memory struct {
 	unit         string
-	memFree      string
-	memTotal     string
-	memSwap      string
-	memSwapTotal string
+	memFree      int
+	memTotal     int
+	memSwap      int
+	memSwapTotal int
 }
 
 type cpu struct {
@@ -58,6 +57,7 @@ type InstantStatServiceInterface interface {
 	FetchCurrentGpuSpeed()
 	FetchCurrentCpuSpeed()
 	FetchCurrentCpuVoltage()
+	FetchCurrentMemoryUsage()
 	FetchCurrentCpuThrottled()
 	FetchCurrentTemperature()
 
@@ -80,6 +80,7 @@ type InstantStatService struct {
 	gpu       []gpu
 	temp      []temperature
 	volts     []voltage
+	memory    []memory
 	throttled []throttled
 }
 
@@ -117,6 +118,7 @@ func NewInstantStatService(fetchIntervalSeconds uint16, inMemDataPointsPerStat u
 		gpu:       make([]gpu, 1, inMemDataPointsPerStat),
 		temp:      make([]temperature, 1, inMemDataPointsPerStat),
 		volts:     make([]voltage, 1, inMemDataPointsPerStat),
+		memory:    make([]memory, 1, inMemDataPointsPerStat),
 		throttled: make([]throttled, 1, inMemDataPointsPerStat),
 	}
 	return iss
@@ -145,7 +147,7 @@ func (iss *InstantStatService) FetchCurrentCpuVoltage() {
 	volts := util.ToFloat(strings.ReplaceAll(v, "V", ""))
 
 	iss.acquireLock(func() {
-		addDataPoint(&iss.volts, voltage{volts: volts, unit: "volts"}, int(iss.InMemDataPointsPerStat))
+		addDataPoint(&iss.volts, voltage{volts: volts, unit: "v"}, int(iss.InMemDataPointsPerStat))
 	})
 }
 
@@ -191,6 +193,46 @@ func (iss *InstantStatService) FetchCurrentTemperature() {
 	})
 }
 
+func (iss *InstantStatService) FetchCurrentMemoryUsage() {
+	var formattedMemoryTotal, formattedMemoryFree int
+	var formattedSwapTotal, formattedSwapUsed int
+
+	res, err := commandOutput(MEMORY_CMD)
+	if err != nil {
+		return
+
+	}
+	rows := strings.Split(res, "\n")
+	for rowNum, row := range rows {
+		if rowNum == 0 {
+			continue
+		}
+		fields := strings.Fields(row)
+		switch rowNum {
+		case 1: // Mem
+			formattedMemoryTotal = util.ToInt(fields[1])
+			formattedMemoryFree = util.ToInt(fields[len(fields)-1])
+		case 2: // Swap
+			formattedSwapTotal = util.ToInt(fields[1])
+			formattedSwapUsed = util.ToInt(fields[2])
+		}
+	}
+	iss.acquireLock(func() {
+		addDataPoint(
+			&iss.memory,
+			memory{
+				memTotal:     formattedMemoryTotal,
+				memFree:      formattedMemoryFree,
+				memSwap:      formattedSwapUsed,
+				memSwapTotal: formattedSwapTotal,
+				unit:         "MB",
+			},
+			int(iss.InMemDataPointsPerStat),
+		)
+	})
+
+}
+
 func (iss *InstantStatService) RawCpuDataPoints() []float32 {
 	return util.MapToRawData(&iss.cpu, func(val cpu) float32 {
 		return val.cpuSpeed
@@ -227,6 +269,7 @@ func (iss *InstantStatService) FetchAndCacheStats() {
 			iss.FetchCurrentGpuSpeed()
 			iss.FetchCurrentCpuSpeed()
 			iss.FetchCurrentCpuVoltage()
+			iss.FetchCurrentMemoryUsage()
 			iss.FetchCurrentCpuThrottled()
 			iss.FetchCurrentTemperature()
 
@@ -237,10 +280,10 @@ func (iss *InstantStatService) FetchAndCacheStats() {
 
 func commandOutput(command string) (string, error) {
 	split := strings.Fields(command)
-	output, err := exec.Command(split[0], split[1:]...).Output()
+	output, err := exec.Command(split[0], split[1:]...).CombinedOutput()
 	if err != nil {
 		if DEBUG {
-			log.Log("Error running command:", err.Error())
+			log.Log("Error running command:", err.Error(), string(output))
 		}
 		return "", err
 	}

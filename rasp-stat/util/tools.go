@@ -6,7 +6,7 @@ import (
 	"sync"
 )
 
-func MapToRawData[T interface{}, U int | float32 | string](o *[]T, mapper func(T) U) []U {
+func MapToRawData[T interface{}, U int | float32 | string | []string](o *[]T, mapper func(T) U) []U {
 	rawRes := make([]U, len(*o))
 	for i, d := range *o {
 		rawRes[i] = mapper(d)
