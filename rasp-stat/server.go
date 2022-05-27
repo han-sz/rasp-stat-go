@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"path"
 	"rasp-stat/rasp-stat/util"
 	"sync"
 
@@ -9,7 +11,8 @@ import (
 )
 
 type RaspStatServer struct {
-	Port int
+	Port       int
+	StaticPath string
 
 	Service  *InstantStatService
 	ReadLock *sync.Mutex
@@ -31,6 +34,7 @@ func (server *RaspStatServer) StartServer() bool {
 	r.Use(gin.Recovery())
 	// Used as a prev val cache for when the read lock is already acquired by another request
 	var cached sync.Map
+
 	r.GET("/temp", func(c *gin.Context) {
 		if locked := server.ReadLock.TryLock(); locked && len(server.Service.temp) > 0 {
 			latestTemp := server.Service.temp[len(server.Service.temp)-1]
@@ -106,9 +110,6 @@ func (server *RaspStatServer) StartServer() bool {
 		} else {
 			c.JSON(200, none)
 		}
-	})
-	r.GET("/mem", func(c *gin.Context) {
-		c.JSON(200, none)
 	})
 	// TODO as /mem/free
 	r.GET("/memFree", func(c *gin.Context) {
@@ -190,6 +191,13 @@ func (server *RaspStatServer) StartServer() bool {
 			c.JSON(500, gin.H{"status": "failed", "error": err.Error()})
 		}
 	})
+
+	// Static
+	if _, err := os.Stat(server.StaticPath); !os.IsNotExist(err) {
+		r.Static("/static", path.Join(server.StaticPath, "static"))
+		r.Static("/app", server.StaticPath)
+		log.Log("Serving web-app from path:", server.StaticPath)
+	}
 
 	log.Log("Starting server on port", server.Port)
 	err := r.Run(fmt.Sprintf(":%d", server.Port))

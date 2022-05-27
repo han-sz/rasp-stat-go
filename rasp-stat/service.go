@@ -8,14 +8,15 @@ import (
 	"time"
 )
 
-const BIN = "/opt/vc/bin/"
-const WIFI_CMD = "iwconfig"
-const TEMP_CMD = "vcgencmd measure_temp"
-const GPUSPEED_CMD = "vcgencmd measure_clock core"
-const CPUSPEED_CMD = "vcgencmd measure_clock arm"
-const CPUTHROTTLED_CMD = "vcgencmd get_throttled"
-const CPUVOLTS_CMD = "vcgencmd measure_volts"
-const MEMORY_CMD = "free -m"
+const (
+	WIFI_CMD         = "iwconfig"
+	TEMP_CMD         = "vcgencmd measure_temp"
+	GPUSPEED_CMD     = "vcgencmd measure_clock core"
+	CPUSPEED_CMD     = "vcgencmd measure_clock arm"
+	CPUTHROTTLED_CMD = "vcgencmd get_throttled"
+	CPUVOLTS_CMD     = "vcgencmd measure_volts"
+	MEMORY_CMD       = "free -m"
+)
 
 type memory struct {
 	unit         string
@@ -143,7 +144,6 @@ func (iss *InstantStatService) FetchCurrentCpuVoltage() {
 		return
 	}
 	_, v := util.SplitEqual(res)
-
 	volts := util.ToFloat(strings.ReplaceAll(v, "V", ""))
 
 	iss.acquireLock(func() {
@@ -280,7 +280,7 @@ func (iss *InstantStatService) FetchAndCacheStats() {
 
 func commandOutput(command string) (string, error) {
 	split := strings.Fields(command)
-	output, err := exec.Command(split[0], split[1:]...).CombinedOutput()
+	output, err := exec.Command(split[0], split[1:]...).Output()
 	if err != nil {
 		if DEBUG {
 			log.Log("Error running command:", err.Error(), string(output))
